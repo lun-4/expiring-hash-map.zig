@@ -1,5 +1,5 @@
 id: u0fqkhu1pg1oxwyaz4o5pa491ffhbnk3dq6xlclnox4ltxll
-name: expiring-hash-map.zig
+name: expiring-hash-map
 main: src/main.zig
 license: MIT
 description: caching utility

@@ -24,27 +24,30 @@ pub fn ExpiringHashMap(lifetime: usize, limit: usize, comptime K: type, comptime
             return self.inner.count();
         }
 
-        pub fn get(self: *Self, key: K) ?V {
+        const MaybeV = union(enum) {
+            expired: V,
+            has_value: V,
+        };
+        const MaybeVPtr = union(enum) {
+            expired: *V,
+            has_value: *V,
+        };
+
+        pub fn get(self: *Self, key: K) ?MaybeV {
             var maybe_value = self.inner.get(key);
             return if (maybe_value) |value| blk: {
                 const current_timestamp = std.time.Instant.now() catch @panic("unsupported OS");
                 const nanosecs = current_timestamp.since(value.timestamp);
-                break :blk if (nanosecs > lifetime)
-                    null
-                else
-                    value.value;
+                break :blk if (nanosecs > lifetime) MaybeV{ .expired = value.value } else MaybeV{ .has_value = value.value };
             } else null;
         }
 
-        pub fn getPtr(self: *Self, key: K) ?*V {
+        pub fn getPtr(self: *Self, key: K) ?MaybeVPtr {
             var maybe_value = self.inner.getPtr(key);
             return if (maybe_value) |value| blk: {
                 const current_timestamp = std.time.Instant.now() catch @panic("unsupported OS");
                 const nanosecs = current_timestamp.since(value.timestamp);
-                break :blk if (nanosecs > lifetime)
-                    null
-                else
-                    &value.value;
+                break :blk if (nanosecs > lifetime) MaybeVPtr{ .expired = &value.value } else MaybeVPtr{ .has_value = &value.value };
             } else null;
         }
 
@@ -52,8 +55,15 @@ pub fn ExpiringHashMap(lifetime: usize, limit: usize, comptime K: type, comptime
             return self.inner.remove(key);
         }
 
-        pub fn put(self: *Self, key: K, value: V) !void {
+        pub const RemovedValues = []V;
+        const RemovedValueList = std.ArrayList(V);
+
+        pub fn put(self: *Self, key: K, value: V) !RemovedValues {
             const value_entry = EntryV{ .timestamp = try std.time.Instant.now(), .value = value };
+
+            var removed_values = RemovedValueList.init(self.inner.allocator);
+            defer removed_values.deinit();
+
             var current_count = self.inner.count();
             if (current_count >= limit) {
                 // go through all entries and try to maybe invalidate
@@ -62,6 +72,7 @@ pub fn ExpiringHashMap(lifetime: usize, limit: usize, comptime K: type, comptime
                     const current_timestamp = std.time.Instant.now() catch @panic("unsupported OS");
                     const nanosecs = current_timestamp.since(entry.value_ptr.timestamp);
                     if (nanosecs > lifetime) {
+                        try removed_values.append(entry.value_ptr.*.value);
                         std.debug.assert(self.inner.remove(entry.key_ptr.*));
                     }
                 }
@@ -72,6 +83,7 @@ pub fn ExpiringHashMap(lifetime: usize, limit: usize, comptime K: type, comptime
             }
 
             try self.inner.put(key, value_entry);
+            return removed_values.toOwnedSlice();
         }
     };
 }
@@ -84,15 +96,15 @@ test "expiring hash map" {
     defer ehm.deinit();
 
     {
-        try std.testing.expectEqual(@as(?usize, null), ehm.get(123));
-        try ehm.put(123, 456);
-        try std.testing.expectEqual(@as(?usize, 456), ehm.get(123));
+        try std.testing.expectEqual(@as(?EHM.MaybeV, null), ehm.get(123));
+        _ = try ehm.put(123, 456);
+        try std.testing.expectEqual(@as(?EHM.MaybeV, EHM.MaybeV{ .has_value = 456 }), ehm.get(123));
         std.time.sleep(lifetime);
-        try std.testing.expectEqual(@as(?usize, null), ehm.get(123));
+        try std.testing.expectEqual(@as(?EHM.MaybeV, EHM.MaybeV{ .expired = 456 }), ehm.get(123));
     }
     {
-        try ehm.put(124, 457);
-        try std.testing.expectEqual(@as(?usize, 457), ehm.get(124));
+        _ = try ehm.put(124, 457);
+        try std.testing.expectEqual(@as(?EHM.MaybeV, EHM.MaybeV{ .has_value = 457 }), ehm.get(124));
     }
 }
 
@@ -103,6 +115,6 @@ test "expiring hash map with harsher limit" {
     var ehm = EHM.init(std.testing.allocator);
     defer ehm.deinit();
 
-    try ehm.put(123, 456);
+    _ = try ehm.put(123, 456);
     try std.testing.expectError(error.OutOfEntries, ehm.put(124, 457));
 }

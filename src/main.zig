@@ -20,6 +20,9 @@ pub fn ExpiringHashMap(lifetime: usize, limit: usize, comptime K: type, comptime
         pub fn deinit(self: *Self) void {
             self.inner.deinit();
         }
+        pub fn count(self: *Self) InnerHashMap.Size {
+            return self.inner.count();
+        }
 
         pub fn get(self: *Self, key: K) ?V {
             var maybe_value = self.inner.get(key);
@@ -33,10 +36,26 @@ pub fn ExpiringHashMap(lifetime: usize, limit: usize, comptime K: type, comptime
             } else null;
         }
 
+        pub fn getPtr(self: *Self, key: K) ?*V {
+            var maybe_value = self.inner.getPtr(key);
+            return if (maybe_value) |value| blk: {
+                const current_timestamp = std.time.Instant.now() catch @panic("unsupported OS");
+                const nanosecs = current_timestamp.since(value.timestamp);
+                break :blk if (nanosecs > lifetime)
+                    null
+                else
+                    &value.value;
+            } else null;
+        }
+
+        pub fn remove(self: *Self, key: K) bool {
+            return self.inner.remove(key);
+        }
+
         pub fn put(self: *Self, key: K, value: V) !void {
             const value_entry = EntryV{ .timestamp = try std.time.Instant.now(), .value = value };
-            var count = self.inner.count();
-            if (count >= limit) {
+            var current_count = self.inner.count();
+            if (current_count >= limit) {
                 // go through all entries and try to maybe invalidate
                 var it = self.inner.iterator();
                 while (it.next()) |entry| {

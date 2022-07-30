@@ -3,7 +3,7 @@
 need a cache or you're limited by memory in your long-lived zig code, well fear no more!
 
 this doesn't implement all of the HashMap API, but it is good enough
-for my usecases.
+for my usecases (https://github.com/lun-4/awtfdb).
 
 ## basically, it goes like this
 

@@ -1,6 +1,11 @@
 const std = @import("std");
 
-pub fn ExpiringHashMap(lifetime: usize, limit: usize, comptime K: type, comptime V: type) type {
+pub fn ExpiringHashMap(
+    comptime lifetime: usize,
+    comptime limit: usize,
+    comptime K: type,
+    comptime V: type,
+) type {
     const EntryV = struct {
         timestamp: std.time.Instant,
         value: V,
